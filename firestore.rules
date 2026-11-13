@@ -1,0 +1,121 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Deny Catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Security Helper Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Strict Schema Validator for Standard Leaderboard Entry
+    function isValidLeaderboardEntry(data) {
+      return data.keys().hasAll([
+        'userId', 'playerName', 'levelId', 'score', 'stars', 'timeSeconds', 'precisionPct', 'vehicleId', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'userId', 'playerName', 'levelId', 'score', 'stars', 'timeSeconds', 'precisionPct', 'angleError', 'collisions', 'vehicleId', 'vehicleName', 'createdAt'
+      ]) &&
+      data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid &&
+      data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 32 &&
+      data.levelId is number && data.levelId >= 1 && data.levelId <= 6 &&
+      data.score is number && data.score >= 0 && data.score <= 100 &&
+      data.stars is number && data.stars >= 1 && data.stars <= 3 &&
+      data.timeSeconds is number && data.timeSeconds > 0 && data.timeSeconds <= 300 &&
+      data.precisionPct is number && data.precisionPct >= 0 && data.precisionPct <= 100 &&
+      (!('angleError' in data) || (data.angleError is number && data.angleError >= 0)) &&
+      (!('collisions' in data) || (data.collisions is number && data.collisions >= 0)) &&
+      data.vehicleId is string && data.vehicleId.size() <= 32 &&
+      (!('vehicleName' in data) || (data.vehicleName is string && data.vehicleName.size() <= 48));
+    }
+
+    // Strict Schema Validator for Daily Challenge Leaderboard Entry
+    function isValidDailyLeaderboardEntry(data) {
+      return data.keys().hasAll([
+        'userId', 'playerName', 'dateKey', 'challengeTitle', 'levelId', 'score', 'stars', 'timeSeconds', 'precisionPct', 'vehicleId', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'userId', 'playerName', 'dateKey', 'challengeTitle', 'levelId', 'score', 'stars', 'timeSeconds', 'precisionPct', 'angleError', 'collisions', 'vehicleId', 'vehicleName', 'createdAt'
+      ]) &&
+      data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid &&
+      data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 32 &&
+      data.dateKey is string && data.dateKey.size() == 10 && data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+      data.challengeTitle is string && data.challengeTitle.size() >= 1 && data.challengeTitle.size() <= 64 &&
+      data.levelId is number && data.levelId >= 1 && data.levelId <= 6 &&
+      data.score is number && data.score >= 0 && data.score <= 100 &&
+      data.stars is number && data.stars >= 1 && data.stars <= 3 &&
+      data.timeSeconds is number && data.timeSeconds > 0 && data.timeSeconds <= 300 &&
+      data.precisionPct is number && data.precisionPct >= 0 && data.precisionPct <= 100 &&
+      (!('angleError' in data) || (data.angleError is number && data.angleError >= 0)) &&
+      (!('collisions' in data) || (data.collisions is number && data.collisions >= 0)) &&
+      data.vehicleId is string && data.vehicleId.size() <= 32 &&
+      (!('vehicleName' in data) || (data.vehicleName is string && data.vehicleName.size() <= 48));
+    }
+
+    // Standard Leaderboards Collection
+    match /leaderboards/{entryId} {
+      // Public Read: Any player can view global leaderboard rankings
+      allow read: if true;
+
+      // Authenticated Create: Player creates verified performance record
+      allow create: if isSignedIn() &&
+        isValidId(entryId) &&
+        isValidLeaderboardEntry(incoming()) &&
+        incoming().createdAt == request.time;
+
+      // Update / Delete: Restricted to original author
+      allow update: if isSignedIn() &&
+        isValidId(entryId) &&
+        existing().userId == request.auth.uid &&
+        isValidLeaderboardEntry(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == request.time;
+
+      allow delete: if isSignedIn() &&
+        isValidId(entryId) &&
+        existing().userId == request.auth.uid;
+    }
+
+    // Daily Challenge Leaderboards Collection
+    match /daily_leaderboards/{entryId} {
+      // Public Read: Any player can view global daily challenge rankings
+      allow read: if true;
+
+      // Authenticated Create: Player creates verified daily performance record
+      allow create: if isSignedIn() &&
+        isValidId(entryId) &&
+        isValidDailyLeaderboardEntry(incoming()) &&
+        incoming().createdAt == request.time;
+
+      // Update / Delete: Restricted to original author
+      allow update: if isSignedIn() &&
+        isValidId(entryId) &&
+        existing().userId == request.auth.uid &&
+        isValidDailyLeaderboardEntry(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().dateKey == existing().dateKey &&
+        incoming().createdAt == request.time;
+
+      allow delete: if isSignedIn() &&
+        isValidId(entryId) &&
+        existing().userId == request.auth.uid;
+    }
+  }
+}
